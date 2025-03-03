@@ -1,0 +1,48 @@
+# Solana Keypairs (ห้าม push private keys)
+**/id.json
+**/wallet.json
+**/.config/solana/*
+
+# Build outputs and dependencies
+/.anchor
+/target
+/node_modules
+/test-ledger
+.yarn
+
+# Rust build backups
+**/*.rs.bk
+
+# IDL & TypeScript Definitions (สร้างใหม่ได้จาก `anchor build`)
+target/idl/*.json
+target/types/*.ts
+target/deploy/*.so
+
+# Local Testing Configs
+test_accounts.json
+local_deploy.sh
+devnet-config.json
+
+# Ignore logs & debug files
+debug.log
+test-results.json
+logs/
+tests/
+
+# Environment Configs
+.env
+Anchor.toml
+
+# MacOS & Windows System Files
+.DS_Store
+Thumbs.db
+
+# Documents and Media Files
+*.png
+*.jpg
+*.docx
+*.pdf
+
+# Lock files (ขึ้นอยู่กับแพ็คเกจที่ใช้)
+package-lock.json
+yarn.lock
