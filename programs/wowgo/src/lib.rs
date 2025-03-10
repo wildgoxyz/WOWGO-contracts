@@ -30,8 +30,14 @@ pub mod wowgo {
         require!(amount > 0, CustomError::InvalidAmount);
     
         let fee_percent = ctx.accounts.state.transfer_fee_percent as u64;
-        let fee_amount = amount * fee_percent / 100;
-        let transfer_amount = amount - fee_amount;
+        let fee_amount = amount
+            .checked_mul(fee_percent)
+            .ok_or(CustomError::Overflow)?
+            .checked_div(100)
+            .ok_or(CustomError::Overflow)?;
+        let transfer_amount = amount
+            .checked_sub(fee_amount)
+            .ok_or(CustomError::Overflow)?;
     
         require!(transfer_amount > 0, CustomError::InvalidAmount);
     
@@ -76,6 +82,10 @@ pub mod wowgo {
     
     pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
         require!(amount > 0, CustomError::InvalidAmount);
+        require!(
+            ctx.accounts.admin.key() == ctx.accounts.state.admin,
+            CustomError::Unauthorized
+        );
 
         let mint_info = &ctx.accounts.mint;
         let to_info = &ctx.accounts.to;
@@ -181,6 +191,17 @@ pub mod wowgo {
 
         Ok(())
     }   
+
+    pub fn set_transfer_fee(ctx: Context<SetTransferFee>, new_fee_percent: u8) -> Result<()> {
+        require!(new_fee_percent <= 10, CustomError::FeeTooHigh);
+        ctx.accounts.state.transfer_fee_percent = new_fee_percent;
+        Ok(())
+    }
+
+    pub fn set_minting_status(ctx: Context<SetMintingStatus>, can_mint: bool) -> Result<()> {
+        ctx.accounts.state.can_mint_more = can_mint;
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -205,52 +226,48 @@ pub struct Initialize<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
 
-    #[account(init, payer = payer, space = 8 + 1, seeds = [b"state"], bump)]
+    #[account(init, payer = payer, space = 8 + 1 + 1 + 32, seeds = [b"state"], bump)]
     pub state: Account<'info, TokenState>,
 
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> Initialize<'info> {
-    pub fn execute(ctx: Context<Initialize>) -> Result<()> {
-        ctx.accounts.state.can_mint_more = true;
-        msg!("Program initialized successfully!");
-        Ok(())
-    }
-}
-
 #[derive(Accounts)]
 pub struct MintTokens<'info> {
-    #[account(mut)]
+    #[account(mut, owner = token::ID)]
     /// CHECK: This is a token mint account, manually validated with `unpack()`
     pub mint: AccountInfo<'info>,  
 
-    #[account(mut)]
+    #[account(mut, owner = token::ID)]
     /// CHECK: This is a recipient account for the minted tokens, manually validated with `unpack()`
     pub to: AccountInfo<'info>,  
 
     #[account(
         seeds = [b"mint_auth", mint.key().as_ref()], 
-        bump,
-        signer
+        bump
     )]
     /// CHECK: This is a PDA acting as the mint authority
     pub mint_auth: AccountInfo<'info>,  
 
-    #[account(mut, seeds = [b"state"], bump)]
+    #[account(mut, seeds = [b"state"], bump, has_one = admin)]
     pub state: Account<'info, TokenState>,
 
+    #[account(signer)]
+    /// CHECK: Only admin can mint tokens
+    pub admin: AccountInfo<'info>,
+
+    #[account(address = token::ID)]
     pub token_program: Program<'info, Token>,
 }
 
 
 #[derive(Accounts)]
 pub struct BurnTokens<'info> {
-    #[account(mut)]
+    #[account(mut, owner = token::ID)]
     /// CHECK: This is a token mint account, manually validated with `unpack()`
     pub mint: AccountInfo<'info>,  
 
-    #[account(mut)]
+    #[account(mut, owner = token::ID)]
     /// CHECK: This is a token account of the owner, manually validated with `unpack()`
     pub from: AccountInfo<'info>,  
 
@@ -258,21 +275,22 @@ pub struct BurnTokens<'info> {
     /// CHECK: The authority of the token account
     pub authority: AccountInfo<'info>,  
 
+    #[account(address = token::ID)]
     pub token_program: Program<'info, Token>,
 }
 
 
 #[derive(Accounts)]
 pub struct TransferTokens<'info> {
-    #[account(mut)]
+    #[account(mut, owner = token::ID)]
     /// CHECK: The source account for transferring tokens, validated by program logic
     pub from: AccountInfo<'info>,  
 
-    #[account(mut)]
+    #[account(mut, owner = token::ID)]
     /// CHECK: The destination account receiving tokens, validated by program logic
     pub to: AccountInfo<'info>,  
 
-    #[account(mut)]
+    #[account(mut, owner = token::ID)]
     /// CHECK: The account receiving the transfer fee
     pub fee_receiver: AccountInfo<'info>,  
 
@@ -283,7 +301,18 @@ pub struct TransferTokens<'info> {
     #[account(mut, seeds = [b"state"], bump)]
     pub state: Account<'info, TokenState>,
 
+    #[account(address = token::ID)]
     pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct SetMintingStatus<'info> {
+    #[account(mut, has_one = admin)]
+    pub state: Account<'info, TokenState>,
+
+    #[account(signer)]
+    /// CHECK: `admin` is owner 
+    pub admin: AccountInfo<'info>,
 }
 
 #[account]
